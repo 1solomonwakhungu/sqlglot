@@ -273,23 +273,11 @@ def build_array_concat(args: BuilderArgs, dialect: Dialect) -> exp.ArrayConcat:
 
 
 def build_array_remove(args: BuilderArgs, dialect: Dialect) -> exp.ArrayRemove:
-    """
-    Builds ArrayRemove with NULL propagation semantics based on the dialect configuration.
-
-    Some dialects (Snowflake) return NULL when the removal value is NULL.
-    Others (DuckDB) may return empty array due to NULL comparison semantics.
-
-    Args:
-        args: Function arguments [array, value_to_remove]
-        dialect: The dialect to read ARRAY_FUNCS_PROPAGATES_NULLS from
-
-    Returns:
-        ArrayRemove expression with appropriate null_propagation flag
-    """
+    """A NULL removal value removes NULL elements in PostgreSQL and returns NULL in Spark."""
     return exp.ArrayRemove(
         this=seq_get(args, 0),
         expression=seq_get(args, 1),
-        null_propagation=dialect.ARRAY_FUNCS_PROPAGATES_NULLS,
+        null_propagation=dialect.ARRAY_REMOVE_PROPAGATES_NULLS,
     )
 
 
@@ -1175,7 +1163,7 @@ class Parser:
         exp.Limit: lambda self: self._parse_limit(),
         exp.Offset: lambda self: self._parse_offset(),
         exp.Order: lambda self: self._parse_order(),
-        exp.Ordered: lambda self: self._parse_ordered(),
+        exp.Ordered: lambda self: self._parse_ordered_with_all(),
         exp.Properties: lambda self: self._parse_properties(),
         exp.PartitionedByProperty: lambda self: self._parse_partitioned_by(),
         exp.Qualify: lambda self: self._parse_qualify(),
@@ -1410,7 +1398,7 @@ class Parser:
         "MULTISET": lambda self: self.expression(exp.SetProperty(multi=True)),
         "NO": lambda self: self._parse_no_property(),
         "ON": lambda self: self._parse_on_property(),
-        "ORDER BY": lambda self: self._parse_order(skip_order_token=True),
+        "ORDER BY": lambda self: self._parse_order(skip_order_token=True, allow_all=False),
         "OUTPUT": lambda self: self.expression(exp.OutputModelProperty(this=self._parse_schema())),
         "PARTITION": lambda self: self._parse_partitioned_of(),
         "PARTITION BY": lambda self: self._parse_partitioned_by(),
@@ -5953,7 +5941,7 @@ class Parser:
         return None
 
     def _parse_order(
-        self, this: exp.Expr | None = None, skip_order_token: bool = False
+        self, this: exp.Expr | None = None, skip_order_token: bool = False, allow_all: bool = True
     ) -> exp.Expr | None:
         siblings = None
         if not skip_order_token and not self._match(TokenType.ORDER_BY):
@@ -5966,7 +5954,9 @@ class Parser:
         return self.expression(
             exp.Order(
                 this=this,
-                expressions=self._parse_csv(self._parse_ordered),
+                expressions=self._parse_csv(
+                    self._parse_ordered_with_all if allow_all else self._parse_ordered
+                ),
                 siblings=siblings,
             ),
             comments=comments,
@@ -5977,15 +5967,31 @@ class Parser:
             return None
         return self.expression(exp_class(expressions=self._parse_csv(self._parse_ordered)))
 
+    def _parse_ordered_with_all(self) -> exp.Ordered | None:
+        token = self._curr
+        starts_with_all = (
+            token.token_type == TokenType.ALL and self._prev.token_type != TokenType.COMMA
+        )
+        ordered = self._parse_ordered()
+        if (
+            starts_with_all
+            and self.dialect.SUPPORTS_ORDER_BY_ALL
+            and ordered
+            and isinstance(ordered.this, exp.Column)
+            and not ordered.this.table
+            and self._curr.token_type != TokenType.COMMA
+        ):
+            ordered.set(
+                "this", self.expression(exp.var("ALL"), token, comments=ordered.this.comments)
+            )
+        return ordered
+
     def _parse_ordered(
         self, parse_method: t.Callable[[], exp.Expr | None] | None = None
     ) -> exp.Ordered | None:
         this = parse_method() if parse_method else self._parse_disjunction()
         if not this:
             return None
-
-        if this.name.upper() == "ALL" and self.dialect.SUPPORTS_ORDER_BY_ALL:
-            this = exp.var("ALL")
 
         asc = self._match(TokenType.ASC)
         desc: bool | None = True if self._match(TokenType.DESC) else (False if asc else None)
@@ -8568,9 +8574,25 @@ class Parser:
 
         return self.expression(exp.Extract(this=this, expression=self._parse_bitwise()))
 
+    def _parse_table_argument(self, table_token: Token | None = None) -> exp.Expr | None:
+        if table_token is None and self._match(TokenType.TABLE):
+            table_token = self._prev
+
+        relation = (
+            self._parse_wrapped(self._parse_table_parts, optional=True)
+            if table_token
+            else self._parse_table()
+        )
+        if isinstance(relation, exp.Table):
+            return self.expression(
+                exp.TableArgument(this=relation),
+                table_token,
+                comments=table_token.comments if table_token else None,
+            )
+        return relation
+
     def _parse_gap_fill(self) -> exp.GapFill:
-        self._match(TokenType.TABLE)
-        this = self._parse_table()
+        this = self._parse_table_argument()
 
         self._match(TokenType.COMMA)
         args = [this, *self._parse_csv(self._parse_lambda)]
@@ -9244,7 +9266,7 @@ class Parser:
     def _parse_partition_and_order(
         self,
     ) -> tuple[list[exp.Expr], exp.Expr | None]:
-        return self._parse_partition_by(), self._parse_order()
+        return self._parse_partition_by(), self._parse_order(allow_all=False)
 
     def _parse_window_spec(self) -> dict[str, str | exp.Expr | None]:
         self._match(TokenType.BETWEEN)

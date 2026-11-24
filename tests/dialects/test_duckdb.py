@@ -10,6 +10,30 @@ from tests.dialects.test_dialect import Validator
 class TestDuckDB(Validator):
     dialect = "duckdb"
 
+    def test_order_by_all(self):
+        self.validate_identity("SELECT ARRAY_AGG(x ORDER BY ALL) FROM t")
+        self.validate_all(
+            "SELECT x, y FROM t ORDER BY ALL DESC",
+            read={
+                "clickhouse": "SELECT x, y FROM t ORDER BY all DESC",
+                "snowflake": "SELECT x, y FROM t ORDER BY all DESC NULLS LAST",
+            },
+        )
+        for dialect, sort_key, expected in (
+            ("snowflake", '"ALL"', '"ALL"'),
+            ("clickhouse", "t.ALL", 't."ALL"'),
+            ("clickhouse", "ALL DESC, x", '"ALL" DESC, x'),
+            ("clickhouse", "x, ALL", 'x, "ALL"'),
+        ):
+            self.validate_all(
+                f"SELECT * FROM t ORDER BY {expected}",
+                read={dialect: f"SELECT * FROM t ORDER BY {sort_key}"},
+            )
+        self.validate_all(
+            'SELECT ROW_NUMBER() OVER (ORDER BY "ALL") FROM t',
+            read={"clickhouse": "SELECT ROW_NUMBER() OVER (ORDER BY ALL) FROM t"},
+        )
+
     def test_format(self):
         for sql in (
             "FORMAT('{}-{}', 1, 2)",
@@ -2589,27 +2613,40 @@ class TestDuckDB(Validator):
         )
 
     def test_array_remove(self):
-        # Test NULL propagation with column reference: Snowflake → DuckDB
         self.validate_all(
-            "CASE WHEN target IS NULL THEN NULL ELSE LIST_FILTER(the_array, LAMBDA _u : _u <> target) END",
+            "CASE WHEN target IS NULL THEN NULL ELSE LIST_FILTER(the_array, LAMBDA _u : _u IS DISTINCT FROM target) END",
             read={
+                "hive": "ARRAY_REMOVE(the_array, target)",
+                "presto": "ARRAY_REMOVE(the_array, target)",
                 "snowflake": "ARRAY_REMOVE(the_array, target)",
+                "spark": "ARRAY_REMOVE(the_array, target)",
+                "trino": "ARRAY_REMOVE(the_array, target)",
             },
         )
-
-        # Test literal values: Snowflake → DuckDB
         self.validate_all(
-            "LIST_FILTER([1, 2, 3], LAMBDA _u : _u <> 2)",
+            "LIST_FILTER([1, 2, NULL, 2], LAMBDA _u : _u IS DISTINCT FROM 2)",
             read={
-                "snowflake": "ARRAY_REMOVE([1, 2, 3], 2)",
+                "postgres": "ARRAY_REMOVE(ARRAY[1, 2, NULL, 2], 2)",
+                "snowflake": "ARRAY_REMOVE([1, 2, NULL, 2], 2)",
+                "spark": "ARRAY_REMOVE(ARRAY(1, 2, NULL, 2), 2)",
+                "trino": "ARRAY_REMOVE(ARRAY[1, 2, NULL, 2], 2)",
             },
         )
-
-        # Test NULL literal: Snowflake → DuckDB
         self.validate_all(
-            "CASE WHEN NULL IS NULL THEN NULL ELSE LIST_FILTER([1, 2, 3], LAMBDA _u : _u <> NULL) END",
+            "CASE WHEN NULL IS NULL THEN NULL ELSE LIST_FILTER([1, 2, NULL, 2], LAMBDA _u : _u IS DISTINCT FROM NULL) END",
             read={
-                "snowflake": "ARRAY_REMOVE([1, 2, 3], NULL)",
+                "snowflake": "ARRAY_REMOVE([1, 2, NULL, 2], NULL)",
+                "trino": "ARRAY_REMOVE(ARRAY[1, 2, NULL, 2], NULL)",
+            },
+        )
+        self.validate_all(
+            "LIST_FILTER([1, 2, NULL, 2], LAMBDA _u : _u IS DISTINCT FROM NULL)",
+            read={"postgres": "ARRAY_REMOVE(ARRAY[1, 2, NULL, 2], NULL)"},
+        )
+        self.validate_all(
+            "SELECT LIST_FILTER([TRUE, FALSE, NULL], LAMBDA _u_2 : _u_2 IS DISTINCT FROM (_u OR FALSE)) FROM (VALUES (TRUE)) AS t(_u)",
+            read={
+                "postgres": "SELECT ARRAY_REMOVE(ARRAY[TRUE, FALSE, NULL], _u OR FALSE) FROM (VALUES (TRUE)) AS t(_u)",
             },
         )
 

@@ -2213,7 +2213,7 @@ class TestDialect(Validator):
         order_by_all_sql = "SELECT * FROM t ORDER BY ALL"
         self.validate_identity(order_by_all_sql).find(exp.Ordered).this.assert_is(exp.Column)
 
-        for dialect in ("duckdb", "spark", "databricks"):
+        for dialect in ("clickhouse", "databricks", "duckdb", "snowflake", "spark"):
             with self.subTest(f"Testing ORDER BY ALL in {dialect}"):
                 parse_one(order_by_all_sql, read=dialect).find(exp.Ordered).this.assert_is(exp.Var)
 
@@ -3156,8 +3156,8 @@ PIVOT(SUM(x) FOR x IN (1))""",
             "ARRAY_REMOVE(the_array, target)",
             write={
                 "": "ARRAY_REMOVE(the_array, target)",
-                "clickhouse": "arrayFilter(_u -> _u <> target, the_array)",
-                "duckdb": "LIST_FILTER(the_array, LAMBDA _u : _u <> target)",
+                "clickhouse": "arrayFilter(_u -> NOT has([target], _u), the_array)",
+                "duckdb": "LIST_FILTER(the_array, LAMBDA _u : _u IS DISTINCT FROM target)",
                 "bigquery": "ARRAY(SELECT _u FROM UNNEST(the_array) AS _u WHERE _u <> target)",
                 "hive": "ARRAY_REMOVE(the_array, target)",
                 "postgres": "ARRAY_REMOVE(the_array, target)",
