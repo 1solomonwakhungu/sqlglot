@@ -12,6 +12,8 @@ FRACTIONAL_SECONDS_RE = re.compile(r":\d+\.(\d+)")
 
 
 class TrinoParser(PrestoParser):
+    STRING_AGG_DEFAULT_SEPARATOR = ""
+
     TYPE_LITERAL_PARSERS: t.ClassVar = {
         **PrestoParser.TYPE_LITERAL_PARSERS,
         **dict.fromkeys(
