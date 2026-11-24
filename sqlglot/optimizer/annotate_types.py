@@ -999,6 +999,8 @@ class TypeAnnotator:
             index = this.keys.index(bracket_arg)
             value = seq_get(this.values, index)
             self._set_type(expression, value.type if value else None)
+        elif this.type.is_type(exp.DType.JSON, exp.DType.VARIANT):
+            self._set_type(expression, this.type)
         else:
             self._set_type(expression, exp.DType.UNKNOWN)
 
@@ -1044,6 +1046,8 @@ class TypeAnnotator:
                 if e.name == expression.expression.name:
                     self._set_type(expression, e.kind)
                     break
+        elif this_type and this_type.is_type(exp.DType.JSON, exp.DType.VARIANT):
+            self._set_type(expression, this_type)
 
         return expression
 
