@@ -1031,6 +1031,21 @@ x < 1;
 x < 1 OR x <= 1;
 x <= 1;
 
+5 >= x AND x < 5;
+x < 5;
+
+x < 5 AND 5 >= x;
+x < 5;
+
+5 >= x OR x < 5;
+x <= 5;
+
+NOT x > 5 AND x < 5;
+x < 5;
+
+1.5 >= x AND x < 1.5;
+x < 1.5;
+
 x > 1 AND x > 2;
 x > 2;
 
@@ -1060,6 +1075,18 @@ x > 1;
 
 x > 1 OR x >= 1;
 x >= 1;
+
+5 <= x AND x > 5;
+x > 5;
+
+5 <= x OR x > 5;
+x >= 5;
+
+NOT x < 5 AND x > 5;
+x > 5;
+
+NOT x < 5 OR x > 5;
+x >= 5;
 
 x > 1 AND x >= 2;
 x >= 2;
@@ -1213,6 +1240,12 @@ x > CAST('2023-12-31' AS DATE);
 
 CAST(x AS DATE) > CAST('2024-01-01' AS DATE) OR CAST(x AS DATE) > CAST('2023-12-31' AS DATE);
 CAST(x AS DATE) > CAST('2023-12-31' AS DATE);
+
+CAST('2024-01-01' AS DATE) >= x AND x < CAST('2024-01-01' AS DATE);
+x < CAST('2024-01-01' AS DATE);
+
+CAST('2024-01-01' AS DATE) >= x OR x < CAST('2024-01-01' AS DATE);
+x <= CAST('2024-01-01' AS DATE);
 
 FUN() > 0 OR FUN() > 1;
 FUN() > 0;

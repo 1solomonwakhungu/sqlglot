@@ -1062,6 +1062,10 @@ class Simplifier:
                     else None
                 )
 
+                if same_direction and l == r:
+                    strict = isinstance(left, (exp.LT, exp.GT))
+                    return left if strict != or_ else right
+
                 for (a, av), (b, bv) in itertools.permutations(((left, l), (right, r))):
                     if isinstance(a, self.LT_LTE) and isinstance(b, self.LT_LTE):
                         return left if (av > bv if or_ else av <= bv) else right
